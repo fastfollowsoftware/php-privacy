@@ -5,6 +5,7 @@ namespace OpenPGP\Tests\Key;
 use OpenPGP\Enum\KeyAlgorithm;
 use OpenPGP\Enum\PacketTag;
 use OpenPGP\OpenPGP;
+use OpenPGP\Packet\Signature\{KeyExpirationTime, SignatureExpirationTime};
 use OpenPGP\Tests\OpenPGPTestCase;
 
 /**
@@ -249,6 +250,30 @@ class PublicKeyTest extends OpenPGPTestCase
         $this->assertSame(
             "8efa53a375fc569aa9ca564a044eac93f0b69ea0",
             $encryptionKey->getFingerprint(true)
+        );
+    }
+
+    public function testReadKeyWhoseSelfSignaturesNeverExpire()
+    {
+        $privateKey = OpenPGP::readPrivateKey(
+            file_get_contents("tests/Data/RsaPrivateKey.asc")
+        )->decrypt("password");
+        $armored = self::armorPublicKeyWithSelfSignatureSubpackets(
+            $privateKey,
+            [
+                new SignatureExpirationTime(pack("N", 0)),
+                new KeyExpirationTime(pack("N", 0)),
+            ]
+        );
+
+        $publicKey = OpenPGP::readPublicKey($armored);
+
+        $this->assertNull($publicKey->getExpirationTime());
+        $this->assertNull($publicKey->getSubkeys()[0]->getExpirationTime());
+        $this->assertTrue($publicKey->verify());
+        $this->assertSame(
+            $privateKey->getSubkeys()[0]->getKeyID(),
+            $publicKey->getEncryptionKeyPacket()->getKeyID()
         );
     }
 
