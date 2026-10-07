@@ -132,7 +132,7 @@ class LiteralMessage extends AbstractMessage implements
         }
         $symmetric = empty($preferredSymmetrics)
             ? $defaultSymmetric
-            : reset($preferredSymmetrics);
+            : self::firstEncryptableSymmetric($preferredSymmetrics);
 
         $preferredAeads = [
             AeadAlgorithm::Ocb,
@@ -403,6 +403,36 @@ class LiteralMessage extends AbstractMessage implements
             );
         }
         return $this;
+    }
+
+    /**
+     * Get the first preferred symmetric algorithm that may encrypt data.
+     * AES-128 is tacitly at the end of every preference list (RFC 9580, section 12.2),
+     * and IDEA, TripleDES and CAST5 must not encrypt data (RFC 9580, section 9.3).
+     *
+     * @param array $preferredSymmetrics
+     * @return SymmetricAlgorithm
+     */
+    private static function firstEncryptableSymmetric(
+        array $preferredSymmetrics,
+    ): SymmetricAlgorithm {
+        foreach ($preferredSymmetrics as $symmetric) {
+            if (
+                !in_array(
+                    $symmetric,
+                    [
+                        SymmetricAlgorithm::Plaintext,
+                        SymmetricAlgorithm::Idea,
+                        SymmetricAlgorithm::TripleDes,
+                        SymmetricAlgorithm::Cast5,
+                    ],
+                    true,
+                )
+            ) {
+                return $symmetric;
+            }
+        }
+        return SymmetricAlgorithm::Aes128;
     }
 
     /**

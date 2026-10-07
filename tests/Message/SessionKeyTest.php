@@ -3,7 +3,9 @@
 namespace OpenPGP\Tests\Message;
 
 use OpenPGP\OpenPGP;
-use OpenPGP\Enum\{AeadAlgorithm, SymmetricAlgorithm};
+use OpenPGP\Common\Config;
+use OpenPGP\Enum\{AeadAlgorithm, PresetRFC, SymmetricAlgorithm};
+use OpenPGP\Packet\Signature\PreferredSymmetricAlgorithms;
 use OpenPGP\Tests\OpenPGPTestCase;
 
 /**
@@ -111,6 +113,68 @@ EOT;
             SymmetricAlgorithm::Aes256
         );
         $this->assertTrue(empty($sessionKey->getAead()));
+    }
+
+    public function testGenerateSessionKeySkipsCiphersThatMustNotEncrypt()
+    {
+        $privateKey = OpenPGP::readPrivateKey(
+            file_get_contents("tests/Data/RsaPrivateKey.asc")
+        )->decrypt(self::PASSPHRASE);
+        $preferring = static fn(SymmetricAlgorithm ...$symmetrics) => OpenPGP::readPublicKey(
+            self::armorPublicKeyWithSelfSignatureSubpackets($privateKey, [
+                new PreferredSymmetricAlgorithms(
+                    implode(
+                        array_map(
+                            static fn($symmetric) => chr($symmetric->value),
+                            $symmetrics
+                        )
+                    )
+                ),
+            ])
+        );
+
+        $this->assertSame(
+            SymmetricAlgorithm::Aes128,
+            OpenPGP::generateSessionKey([
+                $preferring(SymmetricAlgorithm::TripleDes),
+            ])->getSymmetric()
+        );
+        $this->assertSame(
+            SymmetricAlgorithm::Aes192,
+            OpenPGP::generateSessionKey([
+                $preferring(
+                    SymmetricAlgorithm::TripleDes,
+                    SymmetricAlgorithm::Cast5,
+                    SymmetricAlgorithm::Aes192
+                ),
+            ])->getSymmetric()
+        );
+
+        $aeadProtect = Config::aeadProtect();
+        $presetRFC = Config::presetRFC();
+        Config::setAeadProtect(false);
+        Config::presetRFC4880();
+        try {
+            $encrypted = OpenPGP::readEncryptedMessage(
+                OpenPGP::encrypt(
+                    OpenPGP::createLiteralMessage("for a 3DES-only key"),
+                    [$preferring(SymmetricAlgorithm::TripleDes)]
+                )->armor()
+            );
+        } finally {
+            Config::setAeadProtect($aeadProtect);
+            if ($presetRFC === PresetRFC::RFC9580) {
+                Config::presetRFC9580();
+            }
+        }
+        $this->assertSame(
+            "for a 3DES-only key",
+            $encrypted->decrypt([$privateKey])->getLiteralData()->getData()
+        );
+        $this->assertSame(
+            SymmetricAlgorithm::Aes128,
+            $encrypted->getSessionKey()->getSymmetric()
+        );
     }
 
     public function testSessionKeyEncryption()
